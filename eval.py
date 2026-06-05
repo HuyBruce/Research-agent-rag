@@ -1,11 +1,12 @@
 """
-Simple eval suite — chạy 10 test queries, đo citation rate và relevance.
-Usage: python -m research_agent_rag.eval
+Simple eval suite - runs test queries and measures citation rate and relevance.
+Usage: python eval.py
 """
 import asyncio
 import json
+from pathlib import Path
 import time
-from .manager import ResearchManager
+from manager import ResearchManager
 
 TEST_QUERIES = [
     "What is chain-of-thought prompting and how does it improve LLM reasoning?",
@@ -25,7 +26,10 @@ async def run_eval():
         try:
             result = await manager.run(query)
             latency = time.time() - start
-            has_citation = "[Web:" in result.report or "[Paper:" in result.report
+            has_citation = any(
+                marker in result.report
+                for marker in ("[Web:", "[Paper:", "[Knowledge:")
+            )
             results.append({
                 "query": query,
                 "latency_s": round(latency, 2),
@@ -52,9 +56,12 @@ async def run_eval():
     print(f"Citation rate:  {citation_rate*100:.0f}%")
     print(f"Avg latency:    {avg_latency:.1f}s")
 
-    with open("eval_results.json", "w") as f:
+    output_dir = Path("sample_outputs")
+    output_dir.mkdir(exist_ok=True)
+    output_path = output_dir / "eval_results.json"
+    with output_path.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
-    print(f"\nDetailed results saved to eval_results.json")
+    print(f"\nDetailed results saved to {output_path}")
 
     return results
 

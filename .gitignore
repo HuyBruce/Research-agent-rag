@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+.env
+.env.*
+!.env.example
+
+chroma_db/
+/eval_results.json
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

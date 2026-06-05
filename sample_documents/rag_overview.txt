@@ -1,0 +1,7 @@
+Retrieval-Augmented Generation (RAG) is an architecture for grounding language model outputs in external knowledge. A RAG system retrieves relevant documents or passages before generation, then passes that retrieved context to the model so the final answer can be tied to available evidence.
+
+A typical RAG pipeline includes document ingestion, text chunking, embedding generation, vector storage, semantic retrieval, prompt construction, and answer synthesis. ChromaDB can be used as the vector store for local development because it supports persistent collections and similarity search over embedded text chunks.
+
+RAG is useful for private knowledge bases, technical documentation, research assistants, customer support, and any task where the answer should depend on source material that may change over time. Its main risks are poor chunking, weak retrieval ranking, stale documents, missing citations, and over-trusting generated summaries.
+
+Strong RAG implementations usually include citation-aware prompts, retrieval evaluation, source coverage checks, and graceful degradation when no relevant documents are found.

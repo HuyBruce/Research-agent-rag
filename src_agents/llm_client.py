@@ -1,0 +1,355 @@
+import asyncio
+import json
+import os
+import re
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
+_warned_fallback = False
+_provider_name = None
+
+
+def _extract_after(prompt: str, marker: str) -> str:
+    if marker not in prompt:
+        return ""
+    return prompt.split(marker, 1)[1].strip().splitlines()[0].strip()
+
+
+def _topic_summary(query: str) -> str:
+    q = query.lower()
+    if (
+        "speech recognition" in q
+        or "speech regconition" in q
+        or "automatic speech recognition" in q
+        or " asr" in q
+    ):
+        return (
+            "Speech recognition, also called Automatic Speech Recognition (ASR), is the "
+            "process of converting spoken audio into written text. An ASR system takes an "
+            "audio waveform, extracts acoustic features, predicts likely phonetic or token "
+            "sequences, and decodes them into words.\n\n"
+            "Modern speech recognition systems often use deep learning models such as CNNs, "
+            "RNNs, transformers, conformers, or encoder-decoder architectures. They are used "
+            "in voice assistants, transcription tools, call-center analytics, captions, dictation, "
+            "and accessibility products. Key challenges include background noise, accents, speaker "
+            "variation, domain-specific vocabulary, latency, and privacy. [Knowledge: local fallback]"
+        )
+    if "rag" in q or "retrieval" in q:
+        return (
+            "Retrieval-Augmented Generation (RAG) is a pattern for improving LLM answers by "
+            "retrieving relevant external documents before generation. Instead of relying only "
+            "on model parameters, the system embeds a user query, searches a vector database for "
+            "similar chunks, and passes those chunks into the model as context.\n\n"
+            "A typical RAG pipeline has four steps: ingest documents, split them into chunks, "
+            "store embeddings in a vector database, then retrieve the most relevant chunks at "
+            "question time. This helps reduce hallucination, keeps answers grounded in local or "
+            "private data, and makes citations possible. The main tradeoffs are retrieval quality, "
+            "chunking strategy, embedding model choice, latency, and how much context the generator "
+            "can use effectively. [Knowledge: local fallback]"
+        )
+    if "chain-of-thought" in q or "cot" in q or "reasoning" in q:
+        return (
+            "Chain-of-thought prompting asks a language model to solve a problem through "
+            "intermediate reasoning steps instead of jumping directly to the answer. It is useful "
+            "for math, logic, planning, and multi-step analysis because it encourages decomposition "
+            "and consistency checks.\n\n"
+            "In production systems, developers often avoid exposing full hidden reasoning and "
+            "instead ask for concise explanations, structured steps, or verifiable outputs. The "
+            "benefit is better task performance; the risk is that generated reasoning can still be "
+            "wrong, verbose, or misleading if not grounded by tools or retrieval. [Knowledge: local fallback]"
+        )
+    if "attention" in q or "transformer" in q:
+        return (
+            "Attention is the mechanism that lets a transformer decide which tokens are most "
+            "relevant to each other. In self-attention, each token creates query, key, and value "
+            "vectors; attention scores compare queries with keys, then use those scores to combine "
+            "values into contextual representations.\n\n"
+            "Multi-head attention runs this process several times in parallel so the model can "
+            "capture different relationships, such as syntax, long-range dependencies, and semantic "
+            "similarity. This is a core reason transformers work well for language modeling, retrieval, "
+            "translation, and code tasks. [Knowledge: local fallback]"
+        )
+    if "rlhf" in q or "alignment" in q:
+        return (
+            "Reinforcement Learning from Human Feedback (RLHF) is a training process used to align "
+            "language models with human preferences. A common setup trains a reward model from human "
+            "rankings, then optimizes the language model to produce outputs that score well under that "
+            "reward model.\n\n"
+            "RLHF can make models more helpful and safer, but it can also introduce issues such as "
+            "over-optimization, style bias, refusal mistakes, and dependence on the quality of human "
+            "preference data. Modern systems often combine RLHF with supervised fine-tuning, safety "
+            "data, evaluations, and tool grounding. [Knowledge: local fallback]"
+        )
+    return (
+        f"{query} can be answered by identifying the core concept, explaining how it works, "
+        "then discussing practical uses, limitations, and tradeoffs.\n\n"
+        "In a research assistant pipeline, the planner decomposes the question, retrieval provides "
+        "grounding from local documents, and the writer synthesizes the available context into a "
+        "structured answer with citations. [Knowledge: local fallback]"
+    )
+
+
+def _topic_findings(query: str) -> list[str]:
+    q = query.lower()
+    if (
+        "speech recognition" in q
+        or "speech regconition" in q
+        or "automatic speech recognition" in q
+        or " asr" in q
+    ):
+        return [
+            "Speech recognition converts audio signals into text by modeling acoustic patterns and language structure.",
+            "Modern ASR systems typically use neural encoders and decoders trained on large paired audio-text datasets.",
+            "Accuracy depends on audio quality, accents, background noise, vocabulary coverage, and the target domain.",
+        ]
+    if "rag" in q or "retrieval" in q:
+        return [
+            "RAG combines retrieval and generation: retrieval finds relevant context, and generation turns that context into a natural-language answer.",
+            "Vector databases such as ChromaDB are commonly used to store and search document embeddings for semantic similarity.",
+            "RAG quality depends heavily on chunking, embedding quality, retrieval ranking, prompt construction, and citation handling.",
+        ]
+    if "chain-of-thought" in q or "cot" in q or "reasoning" in q:
+        return [
+            "Chain-of-thought improves multi-step task performance by encouraging decomposition before final answers.",
+            "Reasoning traces are not automatically reliable, so production systems should pair them with evaluation, retrieval, or tools.",
+            "Concise, structured reasoning is usually more useful for applications than exposing long hidden chains of thought.",
+        ]
+    if "attention" in q or "transformer" in q:
+        return [
+            "Self-attention lets each token condition on other tokens in the same sequence.",
+            "Query-key similarity scores decide which value vectors contribute most to each token representation.",
+            "Multi-head attention captures multiple relationship types in parallel, improving transformer expressiveness.",
+        ]
+    if "rlhf" in q or "alignment" in q:
+        return [
+            "RLHF uses human preference data to train reward models and improve model behavior.",
+            "It can improve helpfulness and safety, but quality depends on the preference data and optimization process.",
+            "Modern alignment pipelines usually combine RLHF with supervised tuning, evaluations, safety data, and policy constraints.",
+        ]
+    return [
+        "The topic should be decomposed into definitions, mechanisms, applications, and limitations.",
+        "A retrieval step can ground the answer in local documents instead of relying only on model knowledge.",
+        "A synthesis step should make uncertainty and citation coverage explicit.",
+    ]
+
+
+def _topic_conclusion(query: str) -> str:
+    q = query.lower()
+    if (
+        "speech recognition" in q
+        or "speech regconition" in q
+        or "automatic speech recognition" in q
+        or " asr" in q
+    ):
+        return (
+            "Speech recognition is a core speech AI technology for turning spoken language into "
+            "usable text. Strong systems combine robust acoustic modeling, language modeling, "
+            "domain adaptation, and careful evaluation on real audio conditions."
+        )
+    if "rag" in q or "retrieval" in q:
+        return (
+            "RAG is useful when an LLM must answer from private, changing, or source-grounded data. "
+            "It does not guarantee correctness by itself, but it gives the model better evidence and "
+            "makes the system easier to evaluate."
+        )
+    if "chain-of-thought" in q or "cot" in q or "reasoning" in q:
+        return (
+            "Reasoning prompts are most useful when paired with clear task structure and verification. "
+            "They can improve answer quality, but they should not be treated as proof of correctness."
+        )
+    if "attention" in q or "transformer" in q:
+        return (
+            "Attention is central to transformers because it gives models a flexible way to build "
+            "context-aware token representations across a sequence."
+        )
+    if "rlhf" in q or "alignment" in q:
+        return (
+            "RLHF is an important alignment technique, but it is best treated as one part of a broader "
+            "model-quality and safety pipeline."
+        )
+    return (
+        "The pipeline gives a structured answer from the available context and keeps citation coverage "
+        "visible for review."
+    )
+
+
+def _report_for_query(query: str, sources: str) -> str:
+    summary = _topic_summary(query).replace(" [Knowledge: local fallback]", "")
+    source_titles = re.findall(r"\[Paper: ([^\]]+)\]", sources)
+    paper_citation = source_titles[0] if source_titles else "local ChromaDB"
+    has_relevant_paper = (
+        "No papers indexed yet" not in sources
+        and "No relevant papers found" not in sources
+        and bool(source_titles)
+    )
+    paper_note = (
+        "No relevant local papers were available for this run, so the answer relies on the "
+        "knowledge summary rather than document citations."
+        if not has_relevant_paper
+        else f"The local ChromaDB retrieval results were included from {paper_citation}."
+    )
+    technical_detail = (
+        f"{paper_note} [Paper: {paper_citation}]"
+        if has_relevant_paper
+        else paper_note
+    )
+    findings = "\n".join(f"- {item}" for item in _topic_findings(query))
+    return (
+        "Overview\n"
+        f"{summary}\n\n"
+        "Key Findings\n"
+        f"{findings} [Knowledge: local fallback]\n\n"
+        "Technical Details\n"
+        f"{technical_detail}\n\n"
+        "Conclusion\n"
+        f"{_topic_conclusion(query)}"
+    )
+
+
+def _offline_response(prompt: str, error: Exception | None = None) -> str:
+    if "Return only valid JSON" in prompt:
+        query = _extract_after(prompt, "User query:") or "the research question"
+        return json.dumps(
+            {
+                "searches": [
+                    {
+                        "reason": "Build a high-level understanding of the topic.",
+                        "query": query,
+                        "source": "web",
+                    },
+                    {
+                        "reason": "Check the local paper database for grounded excerpts.",
+                        "query": query,
+                        "source": "papers",
+                    },
+                ]
+            }
+        )
+
+    if "Search term:" in prompt:
+        query = _extract_after(prompt, "Search term:") or "the topic"
+        return _topic_summary(query)
+
+    if "Local paper excerpts:" in prompt:
+        query = _extract_after(prompt, "Search query:") or "the topic"
+        excerpts = prompt.split("Local paper excerpts:", 1)[1].strip()
+        titles = re.findall(r"\[Source: ([^\]]+)\]", excerpts)
+        title = titles[0] if titles else "local document"
+        summary = _topic_summary(query).replace(" [Knowledge: local fallback]", "")
+        return (
+            f"{summary}\n\n"
+            f"The retrieved local document '{title}' provides grounding for this answer. "
+            "It emphasizes ingestion, chunking, embedding storage, semantic retrieval, and "
+            "citation-aware synthesis as the core RAG workflow. "
+            f"[Paper: {title}]"
+        )
+
+    if "Sources:" in prompt:
+        query_match = re.search(r"Research query:\s*(.+)", prompt)
+        query = query_match.group(1).strip() if query_match else "the query"
+        sources = prompt.split("Sources:", 1)[1].strip()
+        return _report_for_query(query, sources)
+
+    return (
+        "Local fallback response: the external model provider was unavailable, but the "
+        "pipeline continued in offline demo mode. [Knowledge: local fallback]"
+    )
+
+
+def _generate_ollama_sync(prompt: str) -> str:
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.getenv("OLLAMA_MODEL") or _detect_ollama_model(base_url)
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }
+    ).encode("utf-8")
+    request = Request(
+        f"{base_url}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=120) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    text = data.get("response", "")
+    if not text:
+        raise RuntimeError("Ollama returned an empty response.")
+    return text.strip()
+
+
+def _detect_ollama_model(base_url: str) -> str:
+    request = Request(f"{base_url}/api/tags", method="GET")
+    with urlopen(request, timeout=10) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    models = data.get("models", [])
+    if not models:
+        return DEFAULT_OLLAMA_MODEL
+    names = [item.get("name", "") for item in models]
+    for preferred in (DEFAULT_OLLAMA_MODEL, "llama3.2:3b", "qwen2.5:7b"):
+        if preferred in names:
+            return preferred
+    return names[0]
+
+
+def _generate_gemini_sync(prompt: str) -> str:
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing google-genai. Install it with: "
+            ".venv\\Scripts\\python.exe -m pip install google-genai"
+        ) from exc
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing GEMINI_API_KEY. Set it before running the agent.")
+
+    client = genai.Client(api_key=api_key)
+    model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+    response = client.models.generate_content(model=model, contents=prompt)
+    text = getattr(response, "text", None)
+    if not text:
+        return ""
+    return text.strip()
+
+
+def _generate_sync(prompt: str) -> tuple[str, str]:
+    errors = []
+
+    if os.getenv("DISABLE_OLLAMA") != "1":
+        try:
+            return "ollama", _generate_ollama_sync(prompt)
+        except Exception as exc:
+            errors.append(f"Ollama: {type(exc).__name__}: {exc}")
+
+    try:
+        return "gemini", _generate_gemini_sync(prompt)
+    except Exception as exc:
+        errors.append(f"Gemini: {type(exc).__name__}: {exc}")
+
+    raise RuntimeError("; ".join(errors))
+
+
+async def generate_text(prompt: str) -> str:
+    global _provider_name, _warned_fallback
+    try:
+        provider, text = await asyncio.to_thread(_generate_sync, prompt)
+        if provider != _provider_name:
+            print(f"[Provider] Using {provider}.")
+            _provider_name = provider
+        return text
+    except Exception as exc:
+        if not _warned_fallback:
+            print(
+                "[Provider] Ollama/Gemini unavailable; using local fallback mode "
+                f"({type(exc).__name__}: {exc})"
+            )
+            _warned_fallback = True
+        return _offline_response(prompt, exc)

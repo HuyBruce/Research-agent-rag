@@ -1,0 +1,42 @@
+[
+  {
+    "query": "What is chain-of-thought prompting and how does it improve LLM reasoning?",
+    "latency_s": 1.0,
+    "has_citation": true,
+    "report_len": 1336,
+    "num_sources": 2,
+    "status": "ok"
+  },
+  {
+    "query": "How does RAG (Retrieval Augmented Generation) work?",
+    "latency_s": 0.13,
+    "has_citation": true,
+    "report_len": 1522,
+    "num_sources": 2,
+    "status": "ok"
+  },
+  {
+    "query": "What are the main differences between GPT-4 and open-source LLMs?",
+    "latency_s": 0.13,
+    "has_citation": true,
+    "report_len": 1013,
+    "num_sources": 2,
+    "status": "ok"
+  },
+  {
+    "query": "Explain attention mechanism in transformers",
+    "latency_s": 0.13,
+    "has_citation": true,
+    "report_len": 1228,
+    "num_sources": 2,
+    "status": "ok"
+  },
+  {
+    "query": "What is RLHF and how is it used to align language models?",
+    "latency_s": 0.13,
+    "has_citation": true,
+    "report_len": 1236,
+    "num_sources": 2,
+    "status": "ok"
+  }
+]

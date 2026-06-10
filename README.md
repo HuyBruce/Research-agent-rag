@@ -1,30 +1,34 @@
 # Research Agent RAG
 
-A provider-tolerant multi-agent research assistant that combines structured planning,
-local retrieval-augmented generation (RAG), and report synthesis.
+A provider-tolerant research assistant that combines live web search,
+local retrieval-augmented generation (RAG), model-knowledge summaries, and report synthesis.
 
 The project is designed to be demoable even when external model providers are unavailable:
 
-- Local LLM mode: uses Ollama at `localhost:11434` when available.
-- Live mode: uses Gemini through `google-genai` when `GEMINI_API_KEY` is configured.
+- Web search mode: uses DuckDuckGo HTML search for live web snippets and source URLs.
+- Local LLM mode: uses Ollama at `localhost:11434` when selected.
+- Live model mode: uses Gemini through `google-genai` when `GEMINI_API_KEY` is configured.
 - Fallback mode: runs deterministic local responses when the provider key is missing,
   out of quota, denied, or Ollama is not running.
 
 ## Features
 
-- Planner stage that decomposes a research query into knowledge and paper-retrieval tasks.
-- Knowledge stage that calls Ollama/Gemini when available or a local fallback otherwise.
+- Planner stage that decomposes a research query into web, knowledge, and paper-retrieval tasks.
+- Web search stage that retrieves current/external source snippets.
+- Knowledge stage that calls Ollama/Gemini when available.
 - RAG stage backed by persistent ChromaDB for local document retrieval.
 - Writer stage that synthesizes a concise report with citation markers.
 - Document ingestion from PDF, raw text, or UTF-8 text/markdown files.
+- Runtime chat commands for provider/model/web/fallback selection.
 - Evaluation script for success rate, latency, citation coverage, and source count.
 
 ## Architecture
 
 ```text
 User Query
-  -> PlannerAgent      Creates knowledge and paper retrieval tasks
-  -> KnowledgeAgent    Produces Ollama/Gemini/fallback knowledge summary
+  -> PlannerAgent      Creates web, knowledge, and paper retrieval tasks
+  -> WebSearchAgent    Retrieves live web snippets and URLs
+  -> KnowledgeAgent    Produces Ollama/Gemini model-knowledge summaries
   -> RAGAgent          Retrieves local ChromaDB excerpts
   -> WriterAgent       Synthesizes a structured cited report
 ```
@@ -32,7 +36,8 @@ User Query
 ## Stack
 
 - Python 3.11+
-- Ollama local LLM, optional but recommended
+- DuckDuckGo HTML search for web snippets, no API key required
+- Ollama local LLM, optional
 - Gemini API via `google-genai`
 - ChromaDB for persistent local vector search
 - ChromaDB default embedding function
@@ -72,10 +77,11 @@ ollama pull llama3.2:1b
 ollama run llama3.2:1b
 ```
 
-The app calls Ollama at `http://localhost:11434` before trying Gemini. Override the model with:
+Select Ollama in chat with:
 
 ```cmd
-setx OLLAMA_MODEL "llama3.2:3b"
+/provider ollama
+/model llama3.2:1b
 ```
 
 `llama3.2:1b` is the easiest local demo model. `llama3.2:3b` is better quality if your machine can run it.
@@ -96,6 +102,9 @@ GEMINI_MODEL=gemini-2.5-flash
 LLM_PROVIDER=gemini
 DISABLE_OLLAMA=1
 ALLOW_LOCAL_FALLBACK=0
+ENABLE_WEB_SEARCH=1
+WEB_SEARCH_PROVIDER=duckduckgo
+WEB_SEARCH_LIMIT=5
 ```
 
 `gemini-2.5-flash` is the recommended model for the Google AI Studio free tier.
@@ -108,6 +117,29 @@ Check the active config:
 
 ```cmd
 run.cmd --doctor
+```
+
+## Chat Commands
+
+```text
+/status
+/provider gemini
+/provider ollama
+/provider auto
+/model gemini-2.5-flash
+/fallback on
+/fallback off
+/web on
+/web off
+/help
+```
+
+Provider behavior:
+
+```text
+gemini = use Gemini only
+ollama = use Ollama only
+auto = try Gemini, then Ollama if enabled
 ```
 
 ## Ingest Sample Data
@@ -146,6 +178,7 @@ research-agent-rag/
     llm_client.py
     planner_agent.py
     search_agent.py
+    web_search_agent.py
     rag_agent.py
     writer_agent.py
   sample_documents/
@@ -163,4 +196,6 @@ research-agent-rag/
 
 - Do not commit `.venv`, `chroma_db`, API keys, or `__pycache__`.
 - `chroma_db` is local runtime state; rebuild it with `ingest.py`.
-- Provider order is Ollama, then Gemini, then deterministic fallback.
+- Default provider is Gemini with Ollama disabled.
+- Web search is enabled by default with DuckDuckGo HTML search.
+- Keep `ALLOW_LOCAL_FALLBACK=0` for honest errors instead of generic demo answers.

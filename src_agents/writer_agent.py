@@ -4,9 +4,9 @@ from src_agents.llm_client import generate_text
 
 INSTRUCTIONS = (
     "You are a research synthesis expert. You receive summaries from multiple sources "
-    "(Gemini knowledge summaries and academic paper retrieval). Your job:\n"
+    "(web search results, Gemini/Ollama knowledge summaries, and academic paper retrieval). Your job:\n"
     "1. Synthesize all findings into a coherent, well-structured report.\n"
-    "2. Use only citation markers that appear in the provided sources, such as [Knowledge: model knowledge] or [Paper: document name].\n"
+    "2. Use only citation markers that appear in the provided sources, such as [Web: page title], [Knowledge: model knowledge], or [Paper: document name].\n"
     "3. Organize with clear sections: Overview, Key Findings, Technical Details, Conclusion.\n"
     "4. Be honest about gaps - if no relevant paper source is provided, say that directly.\n"
     "5. Do not invent URLs, numbered references, footnotes, paper titles, or citations.\n"
@@ -15,7 +15,7 @@ INSTRUCTIONS = (
 
 
 def _citation_markers(text: str) -> list[str]:
-    return re.findall(r"\[(?:Knowledge|Paper): [^\]]+\]", text)
+    return re.findall(r"\[(?:Web|Knowledge|Paper): [^\]]+\]", text)
 
 
 async def write_report(query: str, combined_sources: str) -> str:

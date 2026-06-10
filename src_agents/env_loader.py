@@ -17,7 +17,16 @@ def load_dotenv(path: Path | None = None) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key in {"LLM_PROVIDER", "GEMINI_MODEL", "DISABLE_OLLAMA", "ALLOW_LOCAL_FALLBACK"}:
+        if key in {
+            "LLM_PROVIDER",
+            "GEMINI_MODEL",
+            "OLLAMA_MODEL",
+            "DISABLE_OLLAMA",
+            "ALLOW_LOCAL_FALLBACK",
+            "ENABLE_WEB_SEARCH",
+            "WEB_SEARCH_PROVIDER",
+            "WEB_SEARCH_LIMIT",
+        }:
             os.environ[key] = value
         else:
             os.environ.setdefault(key, value)

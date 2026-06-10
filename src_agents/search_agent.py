@@ -11,3 +11,7 @@ INSTRUCTIONS = (
 async def run_search(query: str) -> str:
     prompt = f"{INSTRUCTIONS}\n\nSearch term: {query}"
     return await generate_text(prompt)
+
+
+async def run_knowledge_search(query: str) -> str:
+    return await run_search(query)

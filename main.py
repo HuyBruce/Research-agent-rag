@@ -13,6 +13,13 @@ warnings.filterwarnings(
 
 from manager import ResearchManager
 from src_agents.env_loader import load_dotenv
+from src_agents.runtime_config import (
+    format_status,
+    set_fallback,
+    set_model,
+    set_provider,
+    set_web,
+)
 
 
 load_dotenv()
@@ -40,12 +47,11 @@ def run_doctor() -> int:
     print(f"- GEMINI_MODEL: {model}")
     print(f"- DISABLE_OLLAMA: {os.getenv('DISABLE_OLLAMA', '')}")
     print(f"- ALLOW_LOCAL_FALLBACK: {os.getenv('ALLOW_LOCAL_FALLBACK', '0')}")
+    print(f"- ENABLE_WEB_SEARCH: {os.getenv('ENABLE_WEB_SEARCH', '1')}")
+    print(f"- WEB_SEARCH_PROVIDER: {os.getenv('WEB_SEARCH_PROVIDER', 'duckduckgo')}")
+    print(f"- WEB_SEARCH_LIMIT: {os.getenv('WEB_SEARCH_LIMIT', '5')}")
     print(f"- GEMINI_API_KEY: {'missing/placeholder' if placeholder else 'present'}")
 
-    if provider.strip().lower() != "gemini":
-        print("  WARN set LLM_PROVIDER=gemini to avoid Ollama.")
-    if os.getenv("DISABLE_OLLAMA") != "1":
-        print("  WARN set DISABLE_OLLAMA=1 to block Ollama fallback.")
     if placeholder:
         print("  ERROR replace GEMINI_API_KEY in .env with your real Google AI Studio key.")
         return 1
@@ -56,11 +62,11 @@ def print_banner() -> None:
     print("=== Research Agent RAG ===")
     provider = os.getenv("LLM_PROVIDER", "gemini")
     if provider.strip().lower() == "gemini":
-        print("Provider pipeline: Gemini 2.5 Flash -> Knowledge/RAG -> Writer")
+        print("Provider pipeline: Web Search + Local RAG + Gemini 2.5 Flash -> Writer")
     elif provider.strip().lower() == "auto":
-        print("Provider pipeline: Gemini/Ollama -> Knowledge/RAG -> Writer")
+        print("Provider pipeline: Web Search + Local RAG + Gemini/Ollama -> Writer")
     else:
-        print("Provider pipeline: Ollama -> Knowledge/RAG -> Writer")
+        print("Provider pipeline: Web Search + Local RAG + Ollama -> Writer")
     print(f"Configured LLM_PROVIDER={provider}. Use gemini for Gemini 2.5 Flash.\n")
 
     if not os.getenv("GEMINI_API_KEY"):
@@ -89,7 +95,7 @@ async def main(query_arg: str | None = None, chat: bool = False) -> None:
     manager = ResearchManager()
 
     if chat:
-        print("Chat mode. Type a research question, or type 'exit' to quit.\n")
+        print("Chat mode. Type a research question, /help, or 'exit' to quit.\n")
         while True:
             try:
                 query = input("research> ").strip()
@@ -102,6 +108,10 @@ async def main(query_arg: str | None = None, chat: bool = False) -> None:
                 return
             if not query:
                 continue
+            if query.startswith("/"):
+                print(handle_command(query))
+                print()
+                continue
 
             await run_once(manager, query)
             print()
@@ -109,6 +119,35 @@ async def main(query_arg: str | None = None, chat: bool = False) -> None:
 
     query = query_arg or input("What would you like to research? ").strip()
     await run_once(manager, query)
+
+
+def handle_command(command: str) -> str:
+    parts = command.strip().split(maxsplit=1)
+    name = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if name == "/help":
+        return (
+            "Commands:\n"
+            "- /status\n"
+            "- /provider gemini|ollama|auto\n"
+            "- /model <model-name>\n"
+            "- /fallback on|off\n"
+            "- /web on|off\n"
+            "- /help\n"
+            "- exit"
+        )
+    if name == "/status":
+        return format_status()
+    if name == "/provider":
+        return set_provider(arg)
+    if name == "/model":
+        return set_model(arg)
+    if name == "/fallback":
+        return set_fallback(arg)
+    if name == "/web":
+        return set_web(arg)
+    return "Unknown command. Type /help."
 
 
 if __name__ == "__main__":

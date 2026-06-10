@@ -6,9 +6,10 @@ from src_agents.llm_client import generate_text
 
 PROMPT = (
     "You are a research planning assistant. Given a query, decide the best strategy:\n"
-    "1. Come up with 3-8 web search terms to find current information.\n"
-    "2. Come up with 1-3 paper retrieval queries for academic/technical depth.\n"
-    "Output a combined plan with both web searches and paper queries."
+    "1. Add web search terms for current or externally verifiable information.\n"
+    "2. Add knowledge queries for stable background concepts.\n"
+    "3. Add paper retrieval queries for local academic/technical depth.\n"
+    "Output a combined plan with web, knowledge, and paper queries."
 )
 
 
@@ -36,9 +37,14 @@ def _fallback_plan(query: str) -> ResearchPlan:
     return ResearchPlan(
         searches=[
             SearchItem(
-                reason="Gather a high-level model-knowledge summary.",
+                reason="Find current or externally verifiable web sources.",
                 query=query,
                 source="web",
+            ),
+            SearchItem(
+                reason="Gather a high-level model-knowledge summary.",
+                query=query,
+                source="knowledge",
             ),
             SearchItem(
                 reason="Retrieve local paper excerpts for technical grounding.",
@@ -56,12 +62,13 @@ Return only valid JSON using this exact shape:
 {{
   "searches": [
     {{"reason": "...", "query": "...", "source": "web"}},
+    {{"reason": "...", "query": "...", "source": "knowledge"}},
     {{"reason": "...", "query": "...", "source": "papers"}}
   ]
 }}
 
-Use source="web" for model-knowledge research summaries and source="papers" for local ChromaDB retrieval.
-Create 2-4 total searches.
+Use source="web" for live web search, source="knowledge" for model-knowledge summaries, and source="papers" for local ChromaDB retrieval.
+Create 2-5 total searches.
 
 User query: {query}
 """
@@ -75,7 +82,7 @@ User query: {query}
             )
             for item in data.get("searches", [])
         ]
-        searches = [s for s in searches if s.source in {"web", "papers"}]
+        searches = [s for s in searches if s.source in {"web", "knowledge", "papers"}]
         return ResearchPlan(searches=searches or _fallback_plan(query).searches)
     except Exception:
         return _fallback_plan(query)

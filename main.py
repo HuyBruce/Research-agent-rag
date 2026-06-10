@@ -1,22 +1,87 @@
 import asyncio
 import argparse
 import os
-from manager import ResearchManager
+import sys
+import warnings
+from pathlib import Path
 
+warnings.filterwarnings(
+    "ignore",
+    message="urllib3 .* doesn't match a supported version.*",
+    category=Warning,
+)
+
+from manager import ResearchManager
+from src_agents.env_loader import load_dotenv
+
+
+load_dotenv()
+
+
+def configure_stdio() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+def run_doctor() -> int:
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    provider = os.getenv("LLM_PROVIDER", "gemini")
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    env_path = Path(__file__).resolve().parent / ".env"
+    placeholder = api_key.strip() in {"", "your_gemini_api_key_here", "your_key_here"}
+
+    print("Research Agent RAG doctor")
+    print(f"- main file: {Path(__file__).resolve()}")
+    print(f"- cwd: {Path.cwd().resolve()}")
+    print(f"- .env: {env_path} ({'found' if env_path.exists() else 'missing'})")
+    print(f"- LLM_PROVIDER: {provider}")
+    print(f"- GEMINI_MODEL: {model}")
+    print(f"- DISABLE_OLLAMA: {os.getenv('DISABLE_OLLAMA', '')}")
+    print(f"- ALLOW_LOCAL_FALLBACK: {os.getenv('ALLOW_LOCAL_FALLBACK', '0')}")
+    print(f"- GEMINI_API_KEY: {'missing/placeholder' if placeholder else 'present'}")
+
+    if provider.strip().lower() != "gemini":
+        print("  WARN set LLM_PROVIDER=gemini to avoid Ollama.")
+    if os.getenv("DISABLE_OLLAMA") != "1":
+        print("  WARN set DISABLE_OLLAMA=1 to block Ollama fallback.")
+    if placeholder:
+        print("  ERROR replace GEMINI_API_KEY in .env with your real Google AI Studio key.")
+        return 1
+    return 0
+    
 
 def print_banner() -> None:
     print("=== Research Agent RAG ===")
-    print("Provider pipeline: Ollama/Gemini -> Knowledge/RAG -> Writer")
-    print("Ollama is used first when running locally; Gemini and fallback are backups.\n")
+    provider = os.getenv("LLM_PROVIDER", "gemini")
+    if provider.strip().lower() == "gemini":
+        print("Provider pipeline: Gemini 2.5 Flash -> Knowledge/RAG -> Writer")
+    elif provider.strip().lower() == "auto":
+        print("Provider pipeline: Gemini/Ollama -> Knowledge/RAG -> Writer")
+    else:
+        print("Provider pipeline: Ollama -> Knowledge/RAG -> Writer")
+    print(f"Configured LLM_PROVIDER={provider}. Use gemini for Gemini 2.5 Flash.\n")
 
     if not os.getenv("GEMINI_API_KEY"):
-        print("[Config] GEMINI_API_KEY not found. Ollama or local fallback will be used.")
+        if provider.strip().lower() == "auto":
+            print("[Config] GEMINI_API_KEY not found. Ollama or local fallback will be used.")
+        else:
+            print("[Config] GEMINI_API_KEY not found. Local fallback will be used.")
 
 
 async def run_once(manager: ResearchManager, query: str) -> None:
     if not query:
         query = "Recent advances in LLM reasoning and chain-of-thought prompting"
-    await manager.run(query)
+    try:
+        await manager.run(query)
+    except RuntimeError as exc:
+        print("\n[Error] The configured LLM provider failed.")
+        print(str(exc))
+        print(
+            "\nFix: check your Gemini API key/project, or set "
+            "ALLOW_LOCAL_FALLBACK=1 in .env if you want offline demo answers."
+        )
 
 
 async def main(query_arg: str | None = None, chat: bool = False) -> None:
@@ -47,8 +112,12 @@ async def main(query_arg: str | None = None, chat: bool = False) -> None:
 
 
 if __name__ == "__main__":
+    configure_stdio()
     parser = argparse.ArgumentParser(description="Run the Research Agent RAG pipeline")
     parser.add_argument("--query", "-q", help="Research question to run non-interactively")
     parser.add_argument("--chat", action="store_true", help="Run multiple questions in one session")
+    parser.add_argument("--doctor", action="store_true", help="Show provider/key configuration and exit")
     args = parser.parse_args()
+    if args.doctor:
+        raise SystemExit(run_doctor())
     asyncio.run(main(args.query, args.chat))

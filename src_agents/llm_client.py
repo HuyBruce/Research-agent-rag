@@ -5,9 +5,15 @@ import re
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from src_agents.env_loader import load_dotenv
+
+
+load_dotenv()
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
+DEFAULT_LLM_PROVIDER = "gemini"
+DEFAULT_ALLOW_LOCAL_FALLBACK = "0"
 _warned_fallback = False
 _provider_name = None
 
@@ -20,6 +26,17 @@ def _extract_after(prompt: str, marker: str) -> str:
 
 def _topic_summary(query: str) -> str:
     q = query.lower()
+    if "llma" in q or "llama" in q or "large language model" in q or re.search(r"\bllm\b", q):
+        return (
+            "If you meant LLM, it stands for Large Language Model: a neural network trained "
+            "on large text/code corpora to predict and generate language. LLMs can summarize, "
+            "answer questions, write code, classify text, and follow instructions, but they can "
+            "also hallucinate or miss recent facts without tools or retrieval.\n\n"
+            "If you meant LLaMA, it is Meta's family of open-weight large language models. "
+            "LLaMA-style models can be run locally through tools such as Ollama, while Gemini "
+            "is Google's hosted cloud model. Local models improve privacy and avoid cloud quotas; "
+            "hosted models usually offer stronger quality and convenience. [Knowledge: local fallback]"
+        )
     if (
         "speech recognition" in q
         or "speech regconition" in q
@@ -94,6 +111,12 @@ def _topic_summary(query: str) -> str:
 
 def _topic_findings(query: str) -> list[str]:
     q = query.lower()
+    if "llma" in q or "llama" in q or "large language model" in q or re.search(r"\bllm\b", q):
+        return [
+            "LLM means Large Language Model, a model trained to generate and transform text.",
+            "LLaMA is Meta's open-weight LLM family; Ollama is a local runtime that can run models like LLaMA.",
+            "Gemini is a hosted Google model, while local LLaMA-style models run on your machine with lower privacy risk but weaker hardware-dependent performance.",
+        ]
     if (
         "speech recognition" in q
         or "speech regconition" in q
@@ -138,6 +161,12 @@ def _topic_findings(query: str) -> list[str]:
 
 def _topic_conclusion(query: str) -> str:
     q = query.lower()
+    if "llma" in q or "llama" in q or "large language model" in q or re.search(r"\bllm\b", q):
+        return (
+            "For your project, Gemini is the cloud LLM provider, while Ollama can run local "
+            "LLaMA-style models. Use Gemini for better answers; use local models when you want "
+            "offline/private execution."
+        )
     if (
         "speech recognition" in q
         or "speech regconition" in q
@@ -322,17 +351,37 @@ def _generate_gemini_sync(prompt: str) -> str:
 
 def _generate_sync(prompt: str) -> tuple[str, str]:
     errors = []
+    provider = os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER).strip().lower()
 
-    if os.getenv("DISABLE_OLLAMA") != "1":
+    if provider in {"gemini", "google"}:
+        try:
+            return "gemini", _generate_gemini_sync(prompt)
+        except Exception as exc:
+            errors.append(f"Gemini: {type(exc).__name__}: {exc}")
+
+    elif provider == "ollama":
         try:
             return "ollama", _generate_ollama_sync(prompt)
         except Exception as exc:
             errors.append(f"Ollama: {type(exc).__name__}: {exc}")
 
-    try:
-        return "gemini", _generate_gemini_sync(prompt)
-    except Exception as exc:
-        errors.append(f"Gemini: {type(exc).__name__}: {exc}")
+    elif provider == "auto":
+        try:
+            return "gemini", _generate_gemini_sync(prompt)
+        except Exception as exc:
+            errors.append(f"Gemini: {type(exc).__name__}: {exc}")
+
+        if os.getenv("DISABLE_OLLAMA") != "1":
+            try:
+                return "ollama", _generate_ollama_sync(prompt)
+            except Exception as exc:
+                errors.append(f"Ollama: {type(exc).__name__}: {exc}")
+
+    else:
+        errors.append(
+            "Config: LLM_PROVIDER must be one of gemini, ollama, or auto "
+            f"(got {provider!r})"
+        )
 
     raise RuntimeError("; ".join(errors))
 
@@ -346,9 +395,15 @@ async def generate_text(prompt: str) -> str:
             _provider_name = provider
         return text
     except Exception as exc:
+        allow_fallback = os.getenv("ALLOW_LOCAL_FALLBACK", DEFAULT_ALLOW_LOCAL_FALLBACK).strip()
+        if allow_fallback != "1":
+            raise RuntimeError(
+                "Configured LLM provider failed and ALLOW_LOCAL_FALLBACK is disabled. "
+                f"Original error: {type(exc).__name__}: {exc}"
+            ) from exc
         if not _warned_fallback:
             print(
-                "[Provider] Ollama/Gemini unavailable; using local fallback mode "
+                "[Provider] Configured LLM provider unavailable; using local fallback mode "
                 f"({type(exc).__name__}: {exc})"
             )
             _warned_fallback = True

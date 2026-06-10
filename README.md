@@ -85,33 +85,47 @@ setx OLLAMA_MODEL "llama3.2:3b"
 Optional cloud fallback:
 
 ```cmd
-setx GEMINI_API_KEY "your_gemini_api_key_here"
+copy .env.example .env
 ```
 
-Close and reopen the terminal, then verify:
+Edit `.env`:
+
+```text
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+LLM_PROVIDER=gemini
+DISABLE_OLLAMA=1
+ALLOW_LOCAL_FALLBACK=0
+```
+
+`gemini-2.5-flash` is the recommended model for the Google AI Studio free tier.
+With `LLM_PROVIDER=gemini`, the app uses Gemini first and does not call Ollama.
+Use `LLM_PROVIDER=auto` only if you want Gemini first, then Ollama as fallback.
+Keep `ALLOW_LOCAL_FALLBACK=0` if you want provider/API errors to fail loudly
+instead of producing a generic offline demo answer.
+
+Check the active config:
 
 ```cmd
-echo %GEMINI_API_KEY%
+run.cmd --doctor
 ```
-
-If Gemini returns permission or quota errors, the app automatically falls back.
 
 ## Ingest Sample Data
 
 ```cmd
-.venv\Scripts\python.exe ingest.py --file sample_documents\rag_overview.txt --title "RAG Overview" --id rag_overview
+ingest.cmd --file sample_documents\rag_overview.txt --title "RAG Overview" --id rag_overview
 ```
 
 Run a query against the indexed sample:
 
 ```cmd
-.venv\Scripts\python.exe main.py --query "What is RAG and how does ChromaDB help?"
+run.cmd --query "What is RAG and how does ChromaDB help?"
 ```
 
-Run multiple questions in one terminal session:
+Run chatbot mode so you do not need to restart for every question:
 
 ```cmd
-.venv\Scripts\python.exe main.py --chat
+chat.cmd
 ```
 
 Type `exit` to quit chat mode.
@@ -119,7 +133,7 @@ Type `exit` to quit chat mode.
 ## Evaluation
 
 ```cmd
-.venv\Scripts\python.exe eval.py
+"%LOCALAPPDATA%\Programs\Python\Python311\python.exe" eval.py
 ```
 
 Results are written to `sample_outputs/eval_results.json`.

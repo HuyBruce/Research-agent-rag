@@ -20,6 +20,9 @@ def load_dotenv(path: Path | None = None) -> None:
         if key in {
             "LLM_PROVIDER",
             "GEMINI_MODEL",
+            "HF_MODEL",
+            "HF_MAX_NEW_TOKENS",
+            "HF_TEMPERATURE",
             "OLLAMA_MODEL",
             "DISABLE_OLLAMA",
             "ALLOW_LOCAL_FALLBACK",

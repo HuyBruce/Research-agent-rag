@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import re
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from src_agents.env_loader import load_dotenv
@@ -12,6 +12,7 @@ load_dotenv()
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
+DEFAULT_HF_MODEL = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
 DEFAULT_LLM_PROVIDER = "gemini"
 DEFAULT_ALLOW_LOCAL_FALLBACK = "0"
 _warned_fallback = False
@@ -349,6 +350,58 @@ def _generate_gemini_sync(prompt: str) -> str:
     return text.strip()
 
 
+def _generate_huggingface_sync(prompt: str) -> str:
+    model = os.getenv("HF_MODEL", DEFAULT_HF_MODEL).strip() or DEFAULT_HF_MODEL
+    token = os.getenv("HF_API_TOKEN", "").strip()
+    max_new_tokens = int(os.getenv("HF_MAX_NEW_TOKENS", "700"))
+    temperature = float(os.getenv("HF_TEMPERATURE", "0.2"))
+
+    payload = json.dumps(
+        {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "return_full_text": False,
+            },
+            "options": {"wait_for_model": True},
+        }
+    ).encode("utf-8")
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    request = Request(
+        f"https://api-inference.huggingface.co/models/{model}",
+        data=payload,
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Hugging Face API error {exc.code}: {body}") from exc
+
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"Hugging Face API error: {data['error']}")
+
+    text = ""
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, dict):
+            text = str(first.get("generated_text", ""))
+    elif isinstance(data, dict):
+        text = str(data.get("generated_text", ""))
+
+    if not text.strip():
+        raise RuntimeError(f"Hugging Face returned no generated text: {data!r}")
+    return text.strip()
+
+
 def _generate_sync(prompt: str) -> tuple[str, str]:
     errors = []
     provider = os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER).strip().lower()
@@ -365,11 +418,22 @@ def _generate_sync(prompt: str) -> tuple[str, str]:
         except Exception as exc:
             errors.append(f"Ollama: {type(exc).__name__}: {exc}")
 
+    elif provider in {"huggingface", "hf"}:
+        try:
+            return "huggingface", _generate_huggingface_sync(prompt)
+        except Exception as exc:
+            errors.append(f"HuggingFace: {type(exc).__name__}: {exc}")
+
     elif provider == "auto":
         try:
             return "gemini", _generate_gemini_sync(prompt)
         except Exception as exc:
             errors.append(f"Gemini: {type(exc).__name__}: {exc}")
+
+        try:
+            return "huggingface", _generate_huggingface_sync(prompt)
+        except Exception as exc:
+            errors.append(f"HuggingFace: {type(exc).__name__}: {exc}")
 
         if os.getenv("DISABLE_OLLAMA") != "1":
             try:
@@ -379,7 +443,7 @@ def _generate_sync(prompt: str) -> tuple[str, str]:
 
     else:
         errors.append(
-            "Config: LLM_PROVIDER must be one of gemini, ollama, or auto "
+            "Config: LLM_PROVIDER must be one of gemini, huggingface, ollama, or auto "
             f"(got {provider!r})"
         )
 

@@ -36,6 +36,7 @@ def run_doctor() -> int:
     api_key = os.getenv("GEMINI_API_KEY", "")
     provider = os.getenv("LLM_PROVIDER", "gemini")
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    hf_model = os.getenv("HF_MODEL", "HuggingFaceTB/SmolLM2-1.7B-Instruct")
     env_path = Path(__file__).resolve().parent / ".env"
     placeholder = api_key.strip() in {"", "your_gemini_api_key_here", "your_key_here"}
 
@@ -45,6 +46,8 @@ def run_doctor() -> int:
     print(f"- .env: {env_path} ({'found' if env_path.exists() else 'missing'})")
     print(f"- LLM_PROVIDER: {provider}")
     print(f"- GEMINI_MODEL: {model}")
+    print(f"- HF_MODEL: {hf_model}")
+    print(f"- HF_API_TOKEN: {'present' if os.getenv('HF_API_TOKEN', '').strip() else 'missing'}")
     print(f"- DISABLE_OLLAMA: {os.getenv('DISABLE_OLLAMA', '')}")
     print(f"- ALLOW_LOCAL_FALLBACK: {os.getenv('ALLOW_LOCAL_FALLBACK', '0')}")
     print(f"- ENABLE_WEB_SEARCH: {os.getenv('ENABLE_WEB_SEARCH', '1')}")
@@ -131,6 +134,7 @@ def handle_command(command: str) -> str:
             "Commands:\n"
             "- /status\n"
             "- /provider gemini|ollama|auto\n"
+            "- /provider huggingface\n"
             "- /model <model-name>\n"
             "- /fallback on|off\n"
             "- /web on|off\n"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 
-VALID_PROVIDERS = {"gemini", "ollama", "auto"}
+VALID_PROVIDERS = {"gemini", "huggingface", "hf", "ollama", "auto"}
 VALID_FALLBACK_VALUES = {"0", "1"}
 VALID_WEB_VALUES = {"0", "1"}
 
@@ -12,6 +12,8 @@ def get_status() -> dict[str, str]:
     return {
         "LLM_PROVIDER": os.getenv("LLM_PROVIDER", "gemini"),
         "GEMINI_MODEL": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "HF_MODEL": os.getenv("HF_MODEL", "HuggingFaceTB/SmolLM2-1.7B-Instruct"),
+        "HF_API_TOKEN": "present" if os.getenv("HF_API_TOKEN", "").strip() else "missing",
         "OLLAMA_MODEL": os.getenv("OLLAMA_MODEL", "llama3.2:1b"),
         "DISABLE_OLLAMA": os.getenv("DISABLE_OLLAMA", "1"),
         "ALLOW_LOCAL_FALLBACK": os.getenv("ALLOW_LOCAL_FALLBACK", "0"),
@@ -24,7 +26,9 @@ def get_status() -> dict[str, str]:
 def set_provider(provider: str) -> str:
     normalized = provider.strip().lower()
     if normalized not in VALID_PROVIDERS:
-        return "Invalid provider. Use: gemini, ollama, or auto."
+        return "Invalid provider. Use: gemini, huggingface, ollama, or auto."
+    if normalized == "hf":
+        normalized = "huggingface"
 
     os.environ["LLM_PROVIDER"] = normalized
     if normalized == "ollama":
@@ -43,6 +47,9 @@ def set_model(model: str) -> str:
     if provider == "ollama":
         os.environ["OLLAMA_MODEL"] = model
         return f"OLLAMA_MODEL set to {model}."
+    if provider in {"huggingface", "hf"}:
+        os.environ["HF_MODEL"] = model
+        return f"HF_MODEL set to {model}."
 
     os.environ["GEMINI_MODEL"] = model
     return f"GEMINI_MODEL set to {model}."

@@ -6,6 +6,7 @@ local retrieval-augmented generation (RAG), model-knowledge summaries, and repor
 The project is designed to be demoable even when external model providers are unavailable:
 
 - Web search mode: uses DuckDuckGo HTML search for live web snippets and source URLs.
+- Hugging Face mode: uses the Hugging Face Inference API when selected.
 - Local LLM mode: uses Ollama at `localhost:11434` when selected.
 - Live model mode: uses Gemini through `google-genai` when `GEMINI_API_KEY` is configured.
 - Fallback mode: runs deterministic local responses when the provider key is missing,
@@ -39,6 +40,7 @@ User Query
 - DuckDuckGo HTML search for web snippets, no API key required
 - Ollama local LLM, optional
 - Gemini API via `google-genai`
+- Hugging Face Inference API via stdlib HTTP, optional
 - ChromaDB for persistent local vector search
 - ChromaDB default embedding function
 - pypdf for PDF ingestion
@@ -99,6 +101,10 @@ Edit `.env`:
 ```text
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
+HF_API_TOKEN=your_huggingface_token_optional
+HF_MODEL=HuggingFaceTB/SmolLM2-1.7B-Instruct
+HF_MAX_NEW_TOKENS=700
+HF_TEMPERATURE=0.2
 LLM_PROVIDER=gemini
 DISABLE_OLLAMA=1
 ALLOW_LOCAL_FALLBACK=0
@@ -124,6 +130,7 @@ run.cmd --doctor
 ```text
 /status
 /provider gemini
+/provider huggingface
 /provider ollama
 /provider auto
 /model gemini-2.5-flash
@@ -138,9 +145,21 @@ Provider behavior:
 
 ```text
 gemini = use Gemini only
+huggingface = use Hugging Face Inference API only
 ollama = use Ollama only
-auto = try Gemini, then Ollama if enabled
+auto = try Gemini, then Hugging Face, then Ollama if enabled
 ```
+
+Hugging Face examples:
+
+```text
+/provider huggingface
+/model HuggingFaceTB/SmolLM2-1.7B-Instruct
+```
+
+Some Hugging Face hosted models require `HF_API_TOKEN` or may be unavailable on
+the free serverless endpoint. If that happens, choose another public text
+generation model or add your Hugging Face token in `.env`.
 
 ## Ingest Sample Data
 

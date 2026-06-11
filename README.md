@@ -47,21 +47,22 @@ User Query
 
 ## Quick Start
 
-```bash
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt
-.venv/Scripts/python.exe main.py --query "What is RAG?"
-```
-
-On Windows CMD:
+From this repo on Windows:
 
 ```cmd
-cd /d "D:\path\to\research-agent-rag"
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe main.py --query "What is RAG?"
+cd /d "D:\Github\Research-agent-rag"
+copy .env.example .env
+run.cmd --doctor
+chat.cmd
 ```
 
-The app runs without an API key in local fallback mode.
+Use `run.cmd --query "..."` for one-shot questions, or `chat.cmd` for the interactive research chatbot. The launchers use the local Python 3.11 install path on this Windows machine to avoid broken virtualenv launchers in non-ASCII paths.
+
+Install dependencies if needed:
+
+```cmd
+"%LOCALAPPDATA%\Programs\Python\Python311\python.exe" -m pip install -r requirements.txt
+```
 
 ## Ollama Setup
 
@@ -88,9 +89,9 @@ Select Ollama in chat with:
 
 `llama3.2:1b` is the easiest local demo model. `llama3.2:3b` is better quality if your machine can run it.
 
-## Gemini Setup
+## Provider Setup
 
-Optional cloud fallback:
+Create local config:
 
 ```cmd
 copy .env.example .env
@@ -101,7 +102,7 @@ Edit `.env`:
 ```text
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
-HF_API_TOKEN=your_huggingface_token_optional
+HF_API_TOKEN=
 HF_MODEL=HuggingFaceTB/SmolLM2-1.7B-Instruct
 HF_MAX_NEW_TOKENS=700
 HF_TEMPERATURE=0.2
@@ -118,6 +119,8 @@ With `LLM_PROVIDER=gemini`, the app uses Gemini first and does not call Ollama.
 Use `LLM_PROVIDER=auto` only if you want Gemini first, then Ollama as fallback.
 Keep `ALLOW_LOCAL_FALLBACK=0` if you want provider/API errors to fail loudly
 instead of producing a generic offline demo answer.
+
+Set `HF_API_TOKEN` only if your selected Hugging Face model requires authentication. Leaving it empty is safer than using a placeholder token.
 
 Check the active config:
 
@@ -163,14 +166,18 @@ generation model or add your Hugging Face token in `.env`.
 
 ## Ingest Sample Data
 
+The repo includes sample documents about RAG, agents, vector databases, web grounding, LLMs, Hugging Face, evaluation, and provider tradeoffs.
+
 ```cmd
 ingest.cmd --file sample_documents\rag_overview.txt --title "RAG Overview" --id rag_overview
+ingest.cmd --file sample_documents\rag_best_practices.md --title "RAG Best Practices" --id rag_best_practices
+ingest.cmd --file sample_documents\huggingface_inference.md --title "Hugging Face Inference" --id huggingface_inference
 ```
 
 Run a query against the indexed sample:
 
 ```cmd
-run.cmd --query "What is RAG and how does ChromaDB help?"
+run.cmd --query "Explain RAG best practices from my local documents."
 ```
 
 Run chatbot mode so you do not need to restart for every question:
@@ -180,6 +187,14 @@ chat.cmd
 ```
 
 Type `exit` to quit chat mode.
+
+Useful local-document questions:
+
+```text
+what does the local document say about Hugging Face provider?
+explain RAG best practices from my local documents
+compare local and cloud models using my documents
+```
 
 ## Evaluation
 
@@ -198,12 +213,19 @@ research-agent-rag/
     planner_agent.py
     search_agent.py
     web_search_agent.py
+    runtime_config.py
     rag_agent.py
     writer_agent.py
   sample_documents/
     rag_overview.txt
+    rag_best_practices.md
+    huggingface_inference.md
+    ...
   sample_outputs/
     rag_report.md
+  run.cmd
+  chat.cmd
+  ingest.cmd
   ingest.py
   manager.py
   main.py

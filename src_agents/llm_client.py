@@ -206,9 +206,135 @@ def _topic_conclusion(query: str) -> str:
     )
 
 
+_STOP_WORDS = {
+    "about",
+    "after",
+    "again",
+    "also",
+    "from",
+    "into",
+    "local",
+    "paper",
+    "papers",
+    "question",
+    "research",
+    "say",
+    "says",
+    "source",
+    "that",
+    "the",
+    "this",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+}
+
+
+def _query_terms(query: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", query.lower())
+        if len(word) >= 3 and word not in _STOP_WORDS
+    }
+
+
+def _clean_source_text(text: str) -> str:
+    text = re.sub(r"\[(?:Source|Paper|Web|Knowledge): [^\]]+\]", " ", text)
+    text = re.sub(r"^(?:Web|Knowledge|Paper) Source \d+:\s*", " ", text, flags=re.MULTILINE)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _sentences(text: str) -> list[str]:
+    cleaned = _clean_source_text(text)
+    parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    return [
+        part.strip()
+        for part in parts
+        if 35 <= len(part.strip()) <= 320
+        and not part.strip().startswith("---")
+    ]
+
+
+def _select_source_sentences(query: str, text: str, limit: int = 4) -> list[str]:
+    terms = _query_terms(query)
+    scored = []
+    for index, sentence in enumerate(_sentences(text)):
+        words = set(re.findall(r"[a-z0-9]+", sentence.lower()))
+        score = len(terms & words)
+        if "hugging face" in query.lower() and "hugging face" in sentence.lower():
+            score += 3
+        if "provider" in query.lower() and "provider" in sentence.lower():
+            score += 2
+        scored.append((score, -index, sentence))
+
+    relevant = [item for item in scored if item[0] > 0]
+    if not relevant:
+        relevant = scored[:limit]
+    relevant.sort(reverse=True)
+
+    selected = []
+    seen = set()
+    for _, _, sentence in relevant:
+        key = sentence.lower()
+        if key in seen:
+            continue
+        selected.append(sentence)
+        seen.add(key)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _source_titles(sources: str) -> list[str]:
+    titles = re.findall(r"\[Paper: ([^\]]+)\]", sources)
+    titles += re.findall(r"\[Source: ([^\]]+)\]", sources)
+    return list(dict.fromkeys(titles))
+
+
+def _source_grounded_report(query: str, sources: str) -> str | None:
+    titles = _source_titles(sources)
+    if not titles:
+        return None
+
+    selected = _select_source_sentences(query, sources, limit=5)
+    if not selected:
+        return None
+
+    citation = f"[Paper: {titles[0]}]"
+    overview = " ".join(selected[:2])
+    findings = "\n".join(f"- {sentence} {citation}" for sentence in selected[:4])
+    technical = (
+        f"The answer is grounded in the local ChromaDB result titled "
+        f"'{titles[0]}'. The fallback writer used retrieved excerpts directly because "
+        "the configured LLM provider was unavailable."
+    )
+    conclusion = (
+        "So in this run, the useful part came from local RAG retrieval, while the final "
+        "wording was produced by the offline fallback writer."
+    )
+
+    return (
+        "Overview\n"
+        f"{overview} {citation}\n\n"
+        "Key Findings\n"
+        f"{findings}\n\n"
+        "Technical Details\n"
+        f"{technical} {citation}\n\n"
+        "Conclusion\n"
+        f"{conclusion}"
+    )
+
+
 def _report_for_query(query: str, sources: str) -> str:
+    grounded = _source_grounded_report(query, sources)
+    if grounded:
+        return grounded
+
     summary = _topic_summary(query).replace(" [Knowledge: local fallback]", "")
-    source_titles = re.findall(r"\[Paper: ([^\]]+)\]", sources)
+    source_titles = _source_titles(sources)
     paper_citation = source_titles[0] if source_titles else "local ChromaDB"
     has_relevant_paper = (
         "No papers indexed yet" not in sources
@@ -266,14 +392,24 @@ def _offline_response(prompt: str, error: Exception | None = None) -> str:
     if "Local paper excerpts:" in prompt:
         query = _extract_after(prompt, "Search query:") or "the topic"
         excerpts = prompt.split("Local paper excerpts:", 1)[1].strip()
-        titles = re.findall(r"\[Source: ([^\]]+)\]", excerpts)
+        titles = _source_titles(excerpts)
         title = titles[0] if titles else "local document"
-        summary = _topic_summary(query).replace(" [Knowledge: local fallback]", "")
+        selected = _select_source_sentences(query, excerpts, limit=4)
+        if not selected:
+            summary = _topic_summary(query).replace(" [Knowledge: local fallback]", "")
+            return (
+                f"{summary}\n\n"
+                f"The retrieved local document '{title}' provides grounding for this answer. "
+                f"[Paper: {title}]"
+            )
+        summary = " ".join(selected[:2])
+        bullets = "\n".join(f"- {sentence} [Paper: {title}]" for sentence in selected)
         return (
-            f"{summary}\n\n"
-            f"The retrieved local document '{title}' provides grounding for this answer. "
-            "It emphasizes ingestion, chunking, embedding storage, semantic retrieval, and "
-            "citation-aware synthesis as the core RAG workflow. "
+            f"{summary} [Paper: {title}]\n\n"
+            "Relevant local excerpts\n"
+            f"{bullets}\n\n"
+            "These excerpts came from the local ChromaDB retrieval step, not from model-only "
+            "general knowledge. "
             f"[Paper: {title}]"
         )
 

@@ -294,35 +294,66 @@ def _source_titles(sources: str) -> list[str]:
     return list(dict.fromkeys(titles))
 
 
+def _web_titles(sources: str) -> list[str]:
+    return list(dict.fromkeys(re.findall(r"\[Web: ([^\]]+)\]", sources)))
+
+
+def _section_text(sources: str, label: str) -> str:
+    pattern = rf"{re.escape(label)} Source \d+:\s*(.*?)(?=\n\n===\n\n|$)"
+    parts = re.findall(pattern, sources, flags=re.DOTALL)
+    return "\n\n".join(part.strip() for part in parts if part.strip())
+
+
 def _source_grounded_report(query: str, sources: str) -> str | None:
-    titles = _source_titles(sources)
-    if not titles:
+    paper_titles = _source_titles(sources)
+    web_titles = _web_titles(sources)
+    if not paper_titles and not web_titles:
         return None
 
-    selected = _select_source_sentences(query, sources, limit=5)
-    if not selected:
+    paper_text = _section_text(sources, "Paper")
+    web_text = _section_text(sources, "Web")
+    paper_selected = _select_source_sentences(query, paper_text or sources, limit=4)
+    web_selected = _select_source_sentences(query, web_text, limit=3) if web_text else []
+    if not paper_selected and not web_selected:
         return None
 
-    citation = f"[Paper: {titles[0]}]"
-    overview = " ".join(selected[:2])
-    findings = "\n".join(f"- {sentence} {citation}" for sentence in selected[:4])
-    technical = (
-        f"The answer is grounded in the local ChromaDB result titled "
-        f"'{titles[0]}'. The fallback writer used retrieved excerpts directly because "
-        "the configured LLM provider was unavailable."
+    paper_citation = f"[Paper: {paper_titles[0]}]" if paper_titles else ""
+    web_citation = f"[Web: {web_titles[0]}]" if web_titles else ""
+    overview_parts = []
+    if paper_selected:
+        overview_parts.append(f"Local RAG found: {' '.join(paper_selected[:2])} {paper_citation}")
+    if web_selected:
+        overview_parts.append(f"Web search found: {web_selected[0]} {web_citation}")
+
+    findings = []
+    for sentence in paper_selected[:3]:
+        findings.append(f"- Local document: {sentence} {paper_citation}")
+    for sentence in web_selected[:2]:
+        findings.append(f"- Web result: {sentence} {web_citation}")
+
+    technical_parts = []
+    if paper_titles:
+        technical_parts.append(
+            f"Local ChromaDB returned '{paper_titles[0]}' as a matching document. {paper_citation}"
+        )
+    if web_titles:
+        technical_parts.append(
+            f"Web search returned live DuckDuckGo snippets, led by '{web_titles[0]}'. {web_citation}"
+        )
+    technical_parts.append(
+        "The fallback writer used retrieved source text directly because the configured LLM provider was unavailable."
     )
     conclusion = (
-        "So in this run, the useful part came from local RAG retrieval, while the final "
-        "wording was produced by the offline fallback writer."
+        "So web search is part of the pipeline when enabled, but local-document questions should still be judged mainly from RAG sources."
     )
 
     return (
         "Overview\n"
-        f"{overview} {citation}\n\n"
+        f"{' '.join(overview_parts)}\n\n"
         "Key Findings\n"
-        f"{findings}\n\n"
+        f"{chr(10).join(findings)}\n\n"
         "Technical Details\n"
-        f"{technical} {citation}\n\n"
+        f"{' '.join(technical_parts)}\n\n"
         "Conclusion\n"
         f"{conclusion}"
     )
